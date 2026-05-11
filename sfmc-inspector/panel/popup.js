@@ -98,6 +98,15 @@
     } catch (e) { return date; }
   }
 
+  function formatPathValue(value) {
+    if (!value) return "";
+    return String(value).replace(/\\/g, " / ");
+  }
+
+  function getDataExtensionPath(de) {
+    return formatPathValue(de.categoryFullPath);
+  }
+
   function statusTag(status) {
     if (!status) return "";
     var s = String(status).toLowerCase();
@@ -274,7 +283,8 @@
           isTestable:  de.isTestable || de.IsTestable || false,
           createdDate: de.createdDate || de.CreatedDate || null,
           modifiedDate: de.modifiedDate || de.ModifiedDate || null,
-          categoryId:  de.categoryId || de.CategoryID || null
+          categoryId:  de.categoryId || de.CategoryID || null,
+          path:        getDataExtensionPath(de)
         };
       });
       state.de.items  = items;
@@ -302,6 +312,7 @@
       '<div class="detail-key">' + escHtml(de.customerKey) + "</div>" +
       '<div class="detail-section">' +
         '<div class="detail-section-title">Properties</div>' +
+        detailRow("Path",      de.path || "—") +
         detailRow("Sendable",  de.isSendable ? "Yes" : "No") +
         detailRow("Testable",  de.isTestable  ? "Yes" : "No") +
         detailRow("Created",   fmt(de.createdDate)) +
