@@ -311,8 +311,11 @@
       '<div class="detail-title">' + escHtml(de.name) + "</div>" +
       '<div class="detail-key">' + escHtml(de.customerKey) + "</div>" +
       '<div class="detail-section">' +
+        '<div class="detail-section-title">Path</div>' +
+        pathRow(de.path || "—") +
+      '</div>' +
+      '<div class="detail-section">' +
         '<div class="detail-section-title">Properties</div>' +
-        detailRow("Path",      de.path || "—") +
         detailRow("Sendable",  de.isSendable ? "Yes" : "No") +
         detailRow("Testable",  de.isTestable  ? "Yes" : "No") +
         detailRow("Created",   fmt(de.createdDate)) +
@@ -396,6 +399,12 @@
     return '<div class="detail-row">' +
       '<span class="detail-label">' + escHtml(label) + "</span>" +
       '<span class="detail-value">' + escHtml(String(value || "—")) + "</span>" +
+    "</div>";
+  }
+
+  function pathRow(value) {
+    return '<div class="detail-path-value">' +
+      escHtml(String(value || "—")) +
     "</div>";
   }
 
