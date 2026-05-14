@@ -15,16 +15,26 @@
     de: {
       items:     [],
       loaded:    false,
+      loading:   false,
       filtered:  []
     },
     automations: {
       items:     [],
       loaded:    false,
+      loading:   false,
       filtered:  []
+    },
+    queries: {
+      items:     [],
+      loaded:    false,
+      scanning:  false,
+      scannedAt: null,
+      total:     null
     },
     journeys: {
       items:     [],
       loaded:    false,
+      loading:   false,
       filtered:  []
     },
     // Cached full automation list for DE→Automation mapping
@@ -33,6 +43,7 @@
       automationMatchesByDe: {},
       journeyMatchesByDe:    {},
       automationDetailsById: {},
+      automationMatchesByQueryId: {},
       querySqlById:          {},
       eventDefinitions:      null,
       journeysRaw:           null
@@ -40,7 +51,15 @@
   };
 
   var POPUP_CACHE_KEY     = "sfmcInspectorPopupCache";
-  var POPUP_CACHE_VERSION = 1;
+  var POPUP_CACHE_VERSION = 4;
+
+  if (chrome.storage && chrome.storage.local && chrome.storage.local.setAccessLevel) {
+    chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }, function () {
+      if (chrome.runtime.lastError) {
+        console.warn("[SFMC Inspector Popup] Could not restrict local storage access:", chrome.runtime.lastError.message);
+      }
+    });
+  }
 
   // ─── DOM refs ────────────────────────────────────────────────────────────────
 
@@ -59,6 +78,7 @@
     globalSearch:   $("global-search"),
 
     // DE tab
+    deToolbar:      $("de-toolbar"),
     deCount:        $("de-count"),
     btnLoadDe:      $("btn-load-de"),
     deLoading:      $("de-loading"),
@@ -68,6 +88,7 @@
     btnDeBack:      $("btn-de-back"),
 
     // Automations tab
+    autoToolbar:    $("auto-toolbar"),
     autoCount:      $("auto-count"),
     btnLoadAuto:    $("btn-load-auto"),
     autoLoading:    $("auto-loading"),
@@ -75,6 +96,17 @@
     autoDetail:     $("auto-detail"),
     autoDetailContent: $("auto-detail-content"),
     btnAutoBack:    $("btn-auto-back"),
+
+    // Query Search tab
+    queryCount:      $("query-count"),
+    btnOpenSqlSearch: $("btn-open-sql-search"),
+    btnOpenSqlSearchLarge: $("btn-open-sql-search-large"),
+    btnScanQueries:  $("btn-scan-queries"),
+    btnClearQueryIndex: $("btn-clear-query-index"),
+    queryLoading:    $("query-loading"),
+    queryLoadingLabel: $("query-loading-label"),
+    querySearchInput: $("query-search-input"),
+    queryList:       $("query-list"),
 
     // Journeys tab
     journeyCount:   $("journey-count"),
@@ -134,11 +166,95 @@
     return escHtml(text).replace(re, '<span class="hl">$1</span>');
   }
 
+  function getSfmcHost() {
+    return state.session && state.session.hostname ? String(state.session.hostname).replace(/\/+$/, "") : "";
+  }
+
+  function buildSfmcUrl(path) {
+    var host = getSfmcHost();
+    if (!host) return "";
+    return "https://" + host + path;
+  }
+
+  function encodePathPart(value) {
+    return encodeURIComponent(String(value || ""));
+  }
+
+  function getNativeObjectUrl(type, item) {
+    item = item || {};
+
+    if (type === "dataExtension") {
+      return buildSfmcUrl("/cloud/#app/Contact%20Builder");
+    }
+
+    if (type === "automation") {
+      var automationId = item.id || item.automationId || "";
+      if (automationId) {
+        return buildSfmcUrl("/cloud/#app/Automation%20Studio/AutomationStudioFuel3/%23Instance/" + encodePathPart(automationId) + "/activity");
+      }
+      return buildSfmcUrl("/cloud/#app/Automation%20Studio/AutomationStudioFuel3/");
+    }
+
+    if (type === "query") {
+      var queryId = item.id || item.activityObjectId || item.queryActivityId || item.queryDefinitionId || "";
+      if (queryId) {
+        return buildSfmcUrl("/cloud/#app/Automation%20Studio/AutomationStudioFuel3/%23ActivityModal/300/" + encodePathPart(queryId));
+      }
+      return buildSfmcUrl("/cloud/#app/Automation%20Studio/AutomationStudioFuel3/");
+    }
+
+    if (type === "journey") {
+      var url = item.url || item.nativeUrl || item.link || "";
+      var journeyId = item.id || item.interactionId || item.definitionId || "";
+      var journeyVersion = item.version || item.versionNumber || 1;
+      if (/^https?:\/\//i.test(url)) return url;
+      if (url && url.charAt(0) === "/") return buildSfmcUrl(url);
+      if (journeyId) {
+        return buildSfmcUrl("/cloud/#app/Journey%20Builder/%23" + encodePathPart(journeyId) + "/" + encodePathPart(journeyVersion));
+      }
+      return buildSfmcUrl("/cloud/#app/Journey%20Builder/");
+    }
+
+    return "";
+  }
+
+  function nativeOpenIconHtml() {
+    return '<span class="native-open-icon" aria-hidden="true">↗</span>';
+  }
+
+  function nativeLinkAttrs(type, item) {
+    item = item || {};
+    var id = item.id || item.objectId || item.dataExtensionId ||
+      item.automationId || item.activityObjectId || item.queryActivityId ||
+      item.queryDefinitionId || item.interactionId || item.definitionId || "";
+
+    return ' data-native-type="' + escHtml(type || "") + '"' +
+      ' data-native-id="' + escHtml(id) + '"';
+  }
+
+  function nativeLinkHtml(labelHtml, type, item, className) {
+    var url = getNativeObjectUrl(type, item);
+    var cls = className || "";
+    if (!url) {
+      return '<span class="' + cls + ' native-open-unavailable" title="Open in SFMC non disponibile per questo oggetto">' +
+        labelHtml + nativeOpenIconHtml() +
+      "</span>";
+    }
+    return '<a class="' + cls + ' native-open-link" href="' + escHtml(url) + '" title="View in SFMC"' + nativeLinkAttrs(type, item) + ">" +
+      labelHtml + nativeOpenIconHtml() +
+    "</a>";
+  }
+
+  function nativeTitleHtml(label, type, item) {
+    return nativeLinkHtml(escHtml(label), type, item, "detail-title detail-title-link");
+  }
+
   function emptyRelations() {
     return {
       automationMatchesByDe: {},
       journeyMatchesByDe:    {},
       automationDetailsById: {},
+      automationMatchesByQueryId: {},
       querySqlById:          {},
       eventDefinitions:      null,
       journeysRaw:           null
@@ -156,11 +272,11 @@
 
   function readPopupCache() {
     return new Promise(function (resolve) {
-      if (!chrome.storage || !chrome.storage.session) {
+      if (!chrome.storage || !chrome.storage.local) {
         resolve(null);
         return;
       }
-      chrome.storage.session.get(POPUP_CACHE_KEY, function (result) {
+      chrome.storage.local.get(POPUP_CACHE_KEY, function (result) {
         resolve(result && result[POPUP_CACHE_KEY] ? result[POPUP_CACHE_KEY] : null);
       });
     });
@@ -170,70 +286,83 @@
     return {
       automationMatchesByDe: state.relations.automationMatchesByDe,
       journeyMatchesByDe:    state.relations.journeyMatchesByDe,
+      automationMatchesByQueryId: state.relations.automationMatchesByQueryId,
       // Full automation details can become large; keep them in popup memory only.
       automationDetailsById: {},
-      querySqlById:          state.relations.querySqlById,
+      // Query Search stores SQL inside its own index; avoid duplicating large SQL blobs.
+      querySqlById:          state.queries.loaded ? {} : state.relations.querySqlById,
       eventDefinitions:      state.relations.eventDefinitions,
       journeysRaw:           state.relations.journeysRaw
     };
   }
 
   function savePopupCache() {
-    if (!state.session || !state.session.isValid || !chrome.storage || !chrome.storage.session) return;
+    if (!state.session || !state.session.isValid || !chrome.storage || !chrome.storage.local) return;
 
     var payload = {};
     payload[POPUP_CACHE_KEY] = {
       version:        POPUP_CACHE_VERSION,
       sessionKey:     getSessionCacheKey(state.session),
       updatedAt:      Date.now(),
-      de:             { items: state.de.items, loaded: state.de.loaded },
-      automations:    { items: state.automations.items, loaded: state.automations.loaded },
-      journeys:       { items: state.journeys.items, loaded: state.journeys.loaded },
-      allAutomations: state.allAutomations,
-      relations:      getPersistableRelations()
+      de:             { items: state.de.items, loaded: state.de.loaded }
     };
 
-    chrome.storage.session.set(payload, function () {
+    chrome.storage.local.set(payload, function () {
       if (chrome.runtime.lastError) {
-        console.warn("[SFMC Inspector Popup] Could not save session cache:", chrome.runtime.lastError.message);
+        console.warn("[SFMC Inspector Popup] Could not save local cache:", chrome.runtime.lastError.message);
       }
     });
   }
 
   function clearPopupCache() {
-    if (!chrome.storage || !chrome.storage.session) return Promise.resolve();
+    if (!chrome.storage || !chrome.storage.local) return Promise.resolve();
     return new Promise(function (resolve) {
-      chrome.storage.session.remove(POPUP_CACHE_KEY, resolve);
+      chrome.storage.local.remove(POPUP_CACHE_KEY, resolve);
     });
   }
 
   function setLoadedButtonLabels() {
-    els.btnLoadDe.textContent       = state.de.loaded ? "Reload" : "Load";
-    els.btnLoadAuto.textContent     = state.automations.loaded ? "Reload" : "Load";
-    els.btnLoadJourneys.textContent = state.journeys.loaded ? "Reload" : "Load";
+    els.btnLoadDe.textContent       = state.de.loading ? "Loading" : state.de.loaded ? "Reload" : "Load";
+    els.btnLoadAuto.textContent     = state.automations.loading ? "Loading" : state.automations.loaded ? "Reload" : "Load";
+    els.btnScanQueries.textContent  = state.queries.scanning ? "Scanning" : state.queries.loaded ? "Rescan" : "Scan";
+    els.btnLoadJourneys.textContent = state.journeys.loading ? "Loading" : state.journeys.loaded ? "Reload" : "Load";
   }
 
   function resetLoadedData() {
     state.de.items = [];
     state.de.loaded = false;
+    state.de.loading = false;
     state.automations.items = [];
     state.automations.loaded = false;
+    state.automations.loading = false;
+    state.queries.items = [];
+    state.queries.loaded = false;
+    state.queries.scanning = false;
+    state.queries.scannedAt = null;
+    state.queries.total = null;
     state.journeys.items = [];
     state.journeys.loaded = false;
+    state.journeys.loading = false;
     state.allAutomations = null;
     state.relations = emptyRelations();
 
     els.deList.innerHTML = "";
     els.autoList.innerHTML = "";
+    els.queryList.innerHTML = '<div class="no-results">Query metadata will index automatically when the SFMC session is ready.</div>';
     els.journeyList.innerHTML = "";
     els.deCount.textContent = "—";
     els.autoCount.textContent = "—";
+    els.queryCount.textContent = "—";
     els.journeyCount.textContent = "—";
+    els.querySearchInput.value = "";
+    els.querySearchInput.disabled = true;
+    els.queryLoading.classList.add("hidden");
     els.deDetail.classList.add("hidden");
     els.autoDetail.classList.add("hidden");
     els.deList.classList.remove("hidden");
     els.autoList.classList.remove("hidden");
-    document.querySelector(".panel-toolbar").classList.remove("hidden");
+    els.deToolbar.classList.remove("hidden");
+    els.autoToolbar.classList.remove("hidden");
     setLoadedButtonLabels();
   }
 
@@ -252,30 +381,16 @@
         els.deCount.textContent = state.de.items.length + " DE" + (state.de.items.length !== 1 ? "s" : "");
         renderDeList(els.globalSearch.value.trim());
       }
-
-      if (cache.automations && cache.automations.loaded) {
-        state.automations.items = Array.isArray(cache.automations.items) ? cache.automations.items : [];
-        state.automations.loaded = true;
-        els.autoCount.textContent = state.automations.items.length + " automations";
-        renderAutoList(els.globalSearch.value.trim());
-      }
-
-      if (cache.journeys && cache.journeys.loaded) {
-        state.journeys.items = Array.isArray(cache.journeys.items) ? cache.journeys.items : [];
-        state.journeys.loaded = true;
-        els.journeyCount.textContent = state.journeys.items.length + " journeys";
-        renderJourneyList(els.globalSearch.value.trim());
-      }
-
-      if (Object.prototype.hasOwnProperty.call(cache, "allAutomations")) {
-        state.allAutomations = cache.allAutomations;
-      }
-      state.relations = Object.assign(emptyRelations(), cache.relations || {});
       setLoadedButtonLabels();
     });
   }
 
   // ─── Session ─────────────────────────────────────────────────────────────────
+
+  function preloadAllMetadata() {
+    if (!state.session || !state.session.isValid || state.de.loaded) return;
+    loadDataExtensions();
+  }
 
   function updateSessionUI(session) {
     state.session = session;
@@ -289,7 +404,7 @@
       els.sessionStack.textContent = session.stackKey || "—";
       els.noSession.classList.add("hidden");
       els.mainView.classList.remove("hidden");
-      restoreCachedState(session);
+      restoreCachedState(session).then(preloadAllMetadata);
     } else {
       // Not detected
       els.sessionBadge.className  = "badge badge--error";
@@ -343,6 +458,78 @@
 
   // ─── Tab Navigation ───────────────────────────────────────────────────────────
 
+  function openSqlSearchTab() {
+    chrome.tabs.create({
+      url: chrome.runtime.getURL("sql-search/sql-search.html")
+    });
+  }
+
+  function openInSfmcTab(url) {
+    var host = getSfmcHost();
+    if (!host || !url) {
+      window.alert("Open in SFMC non disponibile per questo oggetto.");
+      return;
+    }
+
+    chrome.tabs.query({}, function (tabs) {
+      var sfmcTab = tabs.find(function (tab) {
+        return tab.url && tab.url.indexOf(host) !== -1;
+      });
+
+      if (!sfmcTab) {
+        window.alert("Tieni aperta una tab di Salesforce Marketing Cloud, poi riprova.");
+        return;
+      }
+
+      chrome.tabs.update(sfmcTab.id, { url: url, active: true }, function () {
+        if (chrome.runtime.lastError) {
+          window.alert("Non riesco ad aprire SFMC: " + chrome.runtime.lastError.message);
+          return;
+        }
+
+        if (sfmcTab.windowId != null && chrome.windows && chrome.windows.update) {
+          chrome.windows.update(sfmcTab.windowId, { focused: true });
+        }
+      });
+    });
+  }
+
+  document.addEventListener("click", function (evt) {
+    var link = evt.target.closest && evt.target.closest(".native-open-link");
+    if (!link) return;
+
+    evt.preventDefault();
+    evt.stopPropagation();
+
+    var url = link.getAttribute("href");
+    var nativeType = link.dataset.nativeType || "";
+    var nativeId = link.dataset.nativeId || "";
+    if (!url) {
+      window.alert("Open in SFMC non disponibile per questo oggetto.");
+      return;
+    }
+
+    if (nativeType === "dataExtension" && nativeId) {
+      chrome.runtime.sendMessage({
+        type: "OPEN_NATIVE_OBJECT",
+        payload: {
+          objectType: nativeType,
+          objectId: nativeId,
+          fallbackUrl: url
+        }
+      }, function (resp) {
+        if (chrome.runtime.lastError) return;
+        if (resp && resp.ok) return;
+        if (resp && resp.error) {
+          window.alert(resp.error);
+        }
+      });
+      return;
+    }
+
+    openInSfmcTab(url);
+  });
+
   function switchTab(tabId) {
     state.activeTab = tabId;
     document.querySelectorAll(".tab-btn").forEach(function (btn) {
@@ -351,10 +538,29 @@
     document.querySelectorAll(".tab-panel").forEach(function (panel) {
       panel.classList.toggle("active", panel.id === "tab-" + tabId);
     });
+    loadTabMetadata(tabId);
+  }
+
+  function loadTabMetadata(tabId) {
+    if (!state.session || !state.session.isValid) return;
+
+    if (tabId === "de" && !state.de.loaded && !state.de.loading) {
+      loadDataExtensions();
+    } else if (tabId === "automations" && !state.automations.loaded && !state.automations.loading) {
+      loadAutomations();
+    } else if (tabId === "journeys" && !state.journeys.loaded && !state.journeys.loading) {
+      loadJourneys();
+    }
   }
 
   document.querySelectorAll(".tab-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () { switchTab(btn.dataset.tab); });
+    btn.addEventListener("click", function () {
+      if (btn.dataset.tab === "queries") {
+        openSqlSearchTab();
+        return;
+      }
+      switchTab(btn.dataset.tab);
+    });
   });
 
   // ─── Global Search ────────────────────────────────────────────────────────────
@@ -418,12 +624,15 @@
   }
 
   function loadDataExtensions() {
-    if (!state.session || !state.session.isValid) return;
+    if (!state.session || !state.session.isValid || state.de.loading) return;
+    state.de.loading = true;
     els.deLoading.classList.remove("hidden");
     els.deList.innerHTML = "";
     els.deCount.textContent = "Loading…";
+    setLoadedButtonLabels();
 
     SfmcApi.getDataExtensions().then(function (data) {
+      state.de.loading = false;
       els.deLoading.classList.add("hidden");
       var raw = data.items || [];
       if (!Array.isArray(raw)) raw = [];
@@ -452,19 +661,21 @@
       }
       renderDeList(els.globalSearch.value.trim());
     }).catch(function (err) {
+      state.de.loading = false;
       els.deLoading.classList.add("hidden");
+      setLoadedButtonLabels();
       els.deList.innerHTML = '<div class="no-results" style="color:var(--red)">' + escHtml(err.message) + "</div>";
     });
   }
 
   function showDeDetail(de) {
     els.deList.classList.add("hidden");
-    document.querySelector(".panel-toolbar").classList.add("hidden");
+    els.deToolbar.classList.add("hidden");
     els.deDetail.classList.remove("hidden");
 
     // Render basic info immediately
     els.deDetailContent.innerHTML =
-      '<div class="detail-title">' + escHtml(de.name) + "</div>" +
+      nativeTitleHtml(de.name, "dataExtension", de) +
       '<div class="detail-key">' + escHtml(de.customerKey) + "</div>" +
       '<div class="detail-section">' +
         '<div class="detail-section-title">Path</div>' +
@@ -506,8 +717,11 @@
             '<div class="detail-section-title">Automations writing to this DE (' + matches.length + ")</div>" +
             matches.map(function (a) {
               return '<div class="relation-item">' +
-                '<div class="relation-item-name">' + escHtml(a.name) + "</div>" +
-                '<div class="relation-item-type">Query: ' + escHtml(a.queryName) + " · Status: " + escHtml(a.status) + "</div>" +
+                nativeLinkHtml(escHtml(a.name), "automation", a, "relation-item-name native-inline-link") +
+                '<div class="relation-item-type">Query: ' +
+                  nativeLinkHtml(escHtml(a.queryName), "query", { id: a.queryId }, "native-inline-link native-inline-link--mono") +
+                  " · Status: " + escHtml(a.status) +
+                "</div>" +
                 (a.sql ? '<div class="sql-block">' + escHtml(a.sql.substring(0, 300)) + (a.sql.length > 300 ? "\n…" : "") + "</div>" : "") +
               "</div>";
             }).join("") +
@@ -534,7 +748,7 @@
             '<div class="detail-section-title">Journey connections (' + matches.length + ")</div>" +
             matches.map(function (j) {
               return '<div class="relation-item">' +
-                '<div class="relation-item-name">' + escHtml(j.name) + "</div>" +
+                nativeLinkHtml(escHtml(j.name), "journey", j, "relation-item-name native-inline-link") +
                 '<div class="relation-item-type">' +
                   '<span class="tag tag--' + (j.status === 'Active' || j.status === 'Running' ? 'green' : j.status === 'Draft' ? 'yellow' : 'muted') + '">' + escHtml(j.status) + '</span>' +
                   ' &nbsp;' + escHtml(j.role) +
@@ -567,24 +781,76 @@
   els.btnDeBack.addEventListener("click", function () {
     els.deDetail.classList.add("hidden");
     els.deList.classList.remove("hidden");
-    document.querySelector(".panel-toolbar").classList.remove("hidden");
+    els.deToolbar.classList.remove("hidden");
   });
 
   els.btnLoadDe.addEventListener("click", loadDataExtensions);
 
   // ─── Automation → DE mapping ──────────────────────────────────────────────────
 
+  function getAutomationItems(data) {
+    var items = data && (data.entry || data.items || data.automations || data);
+    return Array.isArray(items) ? items : [];
+  }
+
+  function getAutomationTotal(data) {
+    if (!data) return null;
+    return data.totalResults || data.totalCount || data.total || null;
+  }
+
+  function normalizeAutomationSummary(a) {
+    return {
+      id:       a.id || a.automationId || "",
+      name:     a.name || "—",
+      key:      a.key  || a.customerKey || "",
+      status:   a.status || "—",
+      schedule: a.schedule ? (a.schedule.scheduleTypeId === 1 ? "Scheduled" : "Triggered") : "—",
+      lastRunTime: a.lastRunTime || null
+    };
+  }
+
+  function loadAutomationPages(page, pageSize, acc, knownTotal, onProgress) {
+    return SfmcApi.getAutomations(page, pageSize).then(function (data) {
+      var pageItems = getAutomationItems(data);
+      var total = getAutomationTotal(data) || knownTotal;
+      acc = acc.concat(pageItems);
+
+      if (onProgress) onProgress(acc.length, total);
+
+      if ((total && acc.length >= total) || pageItems.length < pageSize || page >= 200) {
+        return { items: acc, total: total || acc.length };
+      }
+
+      return loadAutomationPages(page + 1, pageSize, acc, total, onProgress);
+    });
+  }
+
   function getAllAutomations() {
     if (state.allAutomations) {
       return Promise.resolve(state.allAutomations);
     }
-    return SfmcApi.getAutomations(1, 1000).then(function (data) {
-      // Legacy endpoint returns {entry: [...], totalResults: N}
-      var items = data.entry || data.items || data.automations || [];
-      if (!Array.isArray(items)) items = [];
-      state.allAutomations = items;
+    return loadAutomationPages(1, 500, [], null, function (loaded, total) {
+      if (state.queries.scanning && els.queryLoadingLabel) {
+        els.queryLoadingLabel.textContent = total
+          ? "Loading automations " + loaded + " / " + total + "..."
+          : "Loading automations " + loaded + "...";
+      }
+    }).then(function (result) {
+      var seen = {};
+      state.allAutomations = result.items.filter(function (auto) {
+        var key = String(auto.id || auto.automationId || auto.key || auto.name || "").toLowerCase();
+        if (!key) return true;
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+      state.automations.items = state.allAutomations.map(normalizeAutomationSummary);
+      state.automations.loaded = true;
+      els.autoCount.textContent = state.automations.items.length + " automations";
+      renderAutoList(els.globalSearch.value.trim());
+      setLoadedButtonLabels();
       savePopupCache();
-      return items;
+      return state.allAutomations;
     });
   }
 
@@ -652,8 +918,11 @@
 
               if (match) {
                 matches.push({
+                  id:        detail.id || auto.id || auto.automationId || "",
+                  key:       detail.key || auto.key || auto.customerKey || "",
                   name:      detail.name || auto.name || "—",
                   status:    detail.status || auto.status || "—",
+                  queryId:   act.activityObjectId || act.objectId || "",
                   queryName: act.name || "Query Activity",
                   targetKey: target.key || "",
                   sql:       "" // SQL not in this endpoint — fetch separately if needed
@@ -716,6 +985,8 @@
           if (linkedJourneys.length > 0) {
             linkedJourneys.forEach(function (j) {
               matches.push({
+                id:        j.id || "",
+                url:       j.url || j.link || j.nativeUrl || "",
                 name:      j.name || "—",
                 status:    j.status || "—",
                 role:      "Entry Source",
@@ -726,6 +997,7 @@
           } else if (ev.interactionCount > 0 || ev.publishedInteractionCount > 0) {
             // Event def references DE but we couldn't match the specific journey
             matches.push({
+              id:        ev.id || "",
               name:      ev.name + " (event)",
               status:    "Active",
               role:      "Entry Source",
@@ -804,45 +1076,40 @@
   }
 
   function loadAutomations() {
+    if (!state.session || !state.session.isValid || state.automations.loading) return;
+    state.automations.loading = true;
     els.autoLoading.classList.remove("hidden");
     els.autoList.innerHTML = "";
+    state.allAutomations = null;
+    state.relations.automationMatchesByDe = {};
+    state.relations.automationMatchesByQueryId = {};
+    state.relations.automationDetailsById = {};
+    setLoadedButtonLabels();
 
-    SfmcApi.getAutomations(1, 200).then(function (data) {
+    getAllAutomations().then(function () {
+      state.automations.loading = false;
       els.autoLoading.classList.add("hidden");
-      // Legacy automation endpoint returns {entry: [...], totalResults: N}
-      var raw = data.entry || data.items || data.automations || data || [];
-      if (!Array.isArray(raw)) raw = [];
-      var items = raw.map(function (a) {
-        return {
-          id:       a.id || a.automationId || "",
-          name:     a.name || "—",
-          key:      a.key  || a.customerKey || "",
-          status:   a.status || "—",
-          schedule: a.schedule ? (a.schedule.scheduleTypeId === 1 ? "Scheduled" : "Triggered") : "—",
-          lastRunTime: a.lastRunTime || null
-        };
-      });
-      state.automations.items  = items;
-      state.automations.loaded = true;
-      state.allAutomations = raw;
-      state.relations.automationMatchesByDe = {};
-      state.relations.automationDetailsById = {};
-      els.autoCount.textContent = items.length + " automations";
       setLoadedButtonLabels();
-      renderAutoList(els.globalSearch.value.trim());
-      savePopupCache();
+      if (state.queries.loaded) {
+        return buildAutomationMatchesByQueryId(true).then(function () {
+          renderQueryResults(els.querySearchInput.value.trim());
+        });
+      }
     }).catch(function (err) {
+      state.automations.loading = false;
       els.autoLoading.classList.add("hidden");
+      setLoadedButtonLabels();
       els.autoList.innerHTML = '<div class="no-results" style="color:var(--red)">' + escHtml(err.message) + "</div>";
     });
   }
 
   function showAutoDetail(auto) {
     els.autoList.classList.add("hidden");
+    els.autoToolbar.classList.add("hidden");
     els.autoDetail.classList.remove("hidden");
 
     els.autoDetailContent.innerHTML =
-      '<div class="detail-title">' + escHtml(auto.name) + "</div>" +
+      nativeTitleHtml(auto.name, "automation", auto) +
       '<div class="detail-key">' + escHtml(auto.key) + "</div>" +
       '<div class="detail-section">' +
         '<div class="detail-section-title">Properties</div>' +
@@ -926,7 +1193,9 @@
 
             return '<div class="relation-item">' +
               '<div style="display:flex;align-items:center;justify-content:space-between">' +
-                '<div class="relation-item-name">' + escHtml(act.name || "Unnamed Activity") + "</div>" +
+                (isQuery
+                  ? nativeLinkHtml(escHtml(act.name || "Unnamed Activity"), "query", act, "relation-item-name native-inline-link")
+                  : '<div class="relation-item-name">' + escHtml(act.name || "Unnamed Activity") + "</div>") +
                 '<span class="tag tag--' + (isQuery ? "blue" : "muted") + '">' + typeLabel + "</span>" +
               "</div>" +
               (target ? '<div class="relation-item-type">→ ' + escHtml(target) + "</div>" : "") +
@@ -946,9 +1215,441 @@
   els.btnAutoBack.addEventListener("click", function () {
     els.autoDetail.classList.add("hidden");
     els.autoList.classList.remove("hidden");
+    els.autoToolbar.classList.remove("hidden");
   });
 
   els.btnLoadAuto.addEventListener("click", loadAutomations);
+
+  // ─── QUERY SEARCH TAB ───────────────────────────────────────────────────────
+
+  function getQueryActivityItems(data) {
+    var items = data && (data.items || data.entry || data.queries || data);
+    return Array.isArray(items) ? items : [];
+  }
+
+  function getQueryActivityTotal(data) {
+    if (!data) return null;
+    return data.totalCount || data.totalResults || data.total || null;
+  }
+
+  function getQueryActivityId(q) {
+    return q && (
+      q.id ||
+      q.objectId ||
+      q.activityObjectId ||
+      q.queryDefinitionId ||
+      q.queryActivityId ||
+      q.definitionId ||
+      ""
+    );
+  }
+
+  function getQueryTextFromPayload(q) {
+    if (!q) return "";
+    return q.queryText ||
+      q.query ||
+      q.sql ||
+      (q.queryDefinition && q.queryDefinition.queryText) ||
+      "";
+  }
+
+  function normalizeQueryActivity(summary, detail) {
+    var src = Object.assign({}, summary || {}, detail || {});
+    var id = getQueryActivityId(src) || getQueryActivityId(summary) || getQueryActivityId(detail);
+    var targetObject = src.targetObject || src.targetDataExtension || src.dataExtension || {};
+    var sql = getQueryTextFromPayload(src);
+
+    if (id && !sql && Object.prototype.hasOwnProperty.call(state.relations.querySqlById, id)) {
+      sql = state.relations.querySqlById[id];
+    }
+    if (id && sql) {
+      state.relations.querySqlById[id] = sql;
+    }
+
+    return {
+      id:           id || "",
+      name:         src.name || src.queryName || src.activityName || "—",
+      key:          src.key || src.customerKey || src.queryDefinitionKey || src.objectId || "",
+      targetName:   src.targetName || src.targetObjectName || src.dataExtensionName || src.targetDataExtensionName || targetObject.name || "",
+      targetKey:    src.targetKey || src.targetObjectKey || src.dataExtensionCustomerKey || src.targetDataExtensionKey || targetObject.key || targetObject.customerKey || "",
+      queryText:    sql || "",
+      createdDate:  src.createdDate || src.CreatedDate || null,
+      modifiedDate: src.modifiedDate || src.ModifiedDate || null,
+      error:        src.error || ""
+    };
+  }
+
+  function getQuerySearchText(item) {
+    var automationText = getAutomationMatchesForQuery(item).map(function (match) {
+      return [
+        match.automationName,
+        match.automationKey,
+        match.activityName,
+        match.stepName,
+        match.status
+      ].join(" ");
+    }).join("\n");
+
+    return [
+      item.name,
+      item.key,
+      item.targetName,
+      item.targetKey,
+      item.queryText,
+      automationText
+    ].join("\n").toLowerCase();
+  }
+
+  function countOccurrences(text, needle) {
+    if (!text || !needle) return 0;
+    var lower = String(text).toLowerCase();
+    var q = String(needle).toLowerCase();
+    var pos = 0;
+    var count = 0;
+    while ((pos = lower.indexOf(q, pos)) !== -1) {
+      count++;
+      pos += q.length || 1;
+    }
+    return count;
+  }
+
+  function buildSqlSnippet(sql, query) {
+    if (!sql) return "";
+    var text = String(sql).replace(/\r\n/g, "\n");
+    var q = (query || "").toLowerCase();
+    var lower = text.toLowerCase();
+    var idx = q ? lower.indexOf(q) : -1;
+    var start = idx >= 0 ? Math.max(0, idx - 120) : 0;
+    var end = idx >= 0 ? Math.min(text.length, idx + q.length + 220) : Math.min(text.length, 420);
+    var snippet = text.substring(start, end);
+    if (start > 0) snippet = "...\n" + snippet;
+    if (end < text.length) snippet += "\n...";
+    return highlight(snippet, query);
+  }
+
+  function updateQuerySearchSummary(filteredCount) {
+    if (!state.queries.loaded) {
+      els.queryCount.textContent = state.queries.scanning ? "Scanning..." : "—";
+      return;
+    }
+
+    var label = typeof filteredCount === "number"
+      ? filteredCount + " match" + (filteredCount !== 1 ? "es" : "")
+      : state.queries.items.length + " quer" + (state.queries.items.length !== 1 ? "ies" : "y");
+    els.queryCount.textContent = label;
+  }
+
+  function getQueryAutomationKey(value) {
+    return String(value || "").toLowerCase();
+  }
+
+  function getAutomationActivityQueryId(act) {
+    if (!act) return "";
+    return act.activityObjectId ||
+      act.objectId ||
+      act.queryActivityId ||
+      act.queryDefinitionId ||
+      act.definitionId ||
+      "";
+  }
+
+  function buildAutomationMatchesByQueryId(force) {
+    if (!force && state.relations.automationMatchesByQueryId &&
+        Object.keys(state.relations.automationMatchesByQueryId).length > 0) {
+      return Promise.resolve(state.relations.automationMatchesByQueryId);
+    }
+
+    state.relations.automationMatchesByQueryId = {};
+
+    return getAllAutomations().then(function (automations) {
+      els.queryLoadingLabel.textContent = "Mapping Query Activities in automations...";
+
+      return mapWithConcurrency(automations, 4, function (auto) {
+        return getAutomationDetailCached(auto).then(function (detail) {
+          if (!detail || !detail.steps) return null;
+
+          detail.steps.forEach(function (step, stepIndex) {
+            if (!step.activities) return;
+            step.activities.forEach(function (act) {
+              if (act.objectTypeId !== 300) return;
+
+              var queryId = getAutomationActivityQueryId(act);
+              var mapKey = getQueryAutomationKey(queryId);
+              if (!mapKey) return;
+
+              if (!state.relations.automationMatchesByQueryId[mapKey]) {
+                state.relations.automationMatchesByQueryId[mapKey] = [];
+              }
+
+              state.relations.automationMatchesByQueryId[mapKey].push({
+                automationId:   detail.id || auto.id || auto.automationId || "",
+                automationKey:  detail.key || auto.key || auto.customerKey || "",
+                automationName: detail.name || auto.name || "—",
+                status:         detail.status || auto.status || "—",
+                activityName:   act.name || "Query Activity",
+                stepName:       step.name || ("Step " + (stepIndex + 1))
+              });
+            });
+          });
+
+          return null;
+        }).catch(function () { return null; });
+      }, function (done, total) {
+        els.queryLoadingLabel.textContent = "Mapping automations " + done + " / " + total + "...";
+      }).then(function () {
+        Object.keys(state.relations.automationMatchesByQueryId).forEach(function (queryId) {
+          var seen = {};
+          state.relations.automationMatchesByQueryId[queryId] =
+            state.relations.automationMatchesByQueryId[queryId].filter(function (match) {
+              var key = [
+                match.automationId,
+                match.automationName,
+                match.activityName,
+                match.stepName
+              ].join("|").toLowerCase();
+              if (seen[key]) return false;
+              seen[key] = true;
+              return true;
+            });
+        });
+        savePopupCache();
+        return state.relations.automationMatchesByQueryId;
+      });
+    });
+  }
+
+  function getAutomationMatchesForQuery(item) {
+    if (!item) return [];
+    var keys = [
+      item.id,
+      item.key
+    ].map(getQueryAutomationKey).filter(Boolean);
+
+    for (var i = 0; i < keys.length; i++) {
+      var matches = state.relations.automationMatchesByQueryId[keys[i]];
+      if (matches && matches.length) return matches;
+    }
+    return [];
+  }
+
+  function renderAutomationUsage(matches) {
+    if (!matches || matches.length === 0) {
+      return '<div class="query-automation-list"><span class="tag tag--muted">No automation usage found</span></div>';
+    }
+
+    var visible = matches.slice(0, 3);
+    return '<div class="query-automation-list">' +
+      visible.map(function (match) {
+        return '<span class="query-automation-pill" title="' + escHtml(match.activityName || "") + '">' +
+          '<span class="query-automation-name">' + escHtml(match.automationName) + "</span>" +
+          statusTag(match.status) +
+        "</span>";
+      }).join("") +
+      (matches.length > visible.length ? '<span class="tag tag--muted">+' + (matches.length - visible.length) + "</span>" : "") +
+    "</div>";
+  }
+
+  function renderQueryResults(query) {
+    var q = (query || "").trim().toLowerCase();
+
+    if (!state.queries.loaded) {
+      if (!state.queries.scanning) {
+        els.queryList.innerHTML = '<div class="no-results">Query metadata will index automatically when the SFMC session is ready.</div>';
+      }
+      return;
+    }
+
+    var items = state.queries.items.filter(function (item) {
+      if (!q) return true;
+      return getQuerySearchText(item).includes(q);
+    });
+
+    updateQuerySearchSummary(q ? items.length : undefined);
+
+    if (items.length === 0) {
+      els.queryList.innerHTML = '<div class="no-results">No query text matched your search.</div>';
+      return;
+    }
+
+    var visible = items.slice(0, 100);
+    els.queryList.innerHTML = visible.map(function (item) {
+      var occurrenceCount = q ? countOccurrences(item.queryText, q) : 0;
+      var modified = item.modifiedDate ? "Modified " + fmt(item.modifiedDate) : "";
+      var automationMatches = getAutomationMatchesForQuery(item);
+      var meta = [
+        automationMatches.length + " automation" + (automationMatches.length !== 1 ? "s" : ""),
+        modified
+      ].filter(Boolean).join(" · ");
+
+      return '<div class="query-result-item">' +
+        '<div class="query-result-header">' +
+          '<div class="list-item-main">' +
+            nativeLinkHtml(highlight(item.name, q), "query", item, "list-item-name native-inline-link") +
+            '<div class="list-item-sub">' + meta + "</div>" +
+          "</div>" +
+          '<div class="list-item-badges">' +
+            (occurrenceCount ? '<span class="tag tag--blue">' + occurrenceCount + " hit" + (occurrenceCount !== 1 ? "s" : "") + "</span>" : "") +
+          "</div>" +
+        "</div>" +
+        renderAutomationUsage(automationMatches) +
+        (item.queryText
+          ? '<div class="sql-block query-snippet">' + buildSqlSnippet(item.queryText, q) + "</div>"
+          : '<div class="query-missing-sql">SQL text not available for this Query Activity.</div>') +
+      "</div>";
+    }).join("") +
+    (items.length > visible.length
+      ? '<div class="no-results">Showing first ' + visible.length + " of " + items.length + " matches. Narrow the search to see more.</div>"
+      : "");
+  }
+
+  function loadQueryActivityPages(page, pageSize, acc, knownTotal) {
+    return SfmcApi.getQueryActivities(page, pageSize).then(function (data) {
+      var pageItems = getQueryActivityItems(data);
+      var total = getQueryActivityTotal(data) || knownTotal;
+      acc = acc.concat(pageItems);
+
+      els.queryLoadingLabel.textContent = total
+        ? "Found " + acc.length + " / " + total + " Query Activities..."
+        : "Found " + acc.length + " Query Activities...";
+
+      if ((total && acc.length >= total) || pageItems.length < pageSize || page >= 200) {
+        return { items: acc, total: total || acc.length };
+      }
+
+      return loadQueryActivityPages(page + 1, pageSize, acc, total);
+    });
+  }
+
+  function mapWithConcurrency(items, limit, worker, onProgress) {
+    return new Promise(function (resolve) {
+      var results = new Array(items.length);
+      var nextIndex = 0;
+      var active = 0;
+      var done = 0;
+
+      function launch() {
+        if (done >= items.length) {
+          resolve(results);
+          return;
+        }
+
+        while (active < limit && nextIndex < items.length) {
+          (function (index) {
+            active++;
+            Promise.resolve(worker(items[index], index))
+              .then(function (result) { results[index] = result; })
+              .catch(function () { results[index] = null; })
+              .then(function () {
+                active--;
+                done++;
+                if (onProgress) onProgress(done, items.length);
+                launch();
+              });
+          })(nextIndex++);
+        }
+      }
+
+      launch();
+    });
+  }
+
+  function hydrateQueryActivities(rawItems) {
+    return mapWithConcurrency(rawItems, 6, function (raw) {
+      var seed = normalizeQueryActivity(raw, null);
+      if (!seed.id || seed.queryText) return Promise.resolve(seed);
+
+      return SfmcApi.getQueryActivityById(seed.id)
+        .then(function (detail) {
+          return normalizeQueryActivity(raw, detail);
+        })
+        .catch(function (err) {
+          seed.error = err && err.message ? err.message : "Could not load detail";
+          return seed;
+        });
+    }, function (done, total) {
+      els.queryLoadingLabel.textContent = "Indexing SQL " + done + " / " + total + "...";
+    });
+  }
+
+  function loadQueryIndex() {
+    if (!state.session || !state.session.isValid || state.queries.scanning) return;
+
+    state.queries.scanning = true;
+    state.queries.loaded = false;
+    state.queries.items = [];
+    state.queries.total = null;
+    state.relations.automationMatchesByQueryId = {};
+    state.relations.querySqlById = {};
+    els.querySearchInput.disabled = true;
+    els.queryLoading.classList.remove("hidden");
+    els.queryLoadingLabel.textContent = "Scanning Query Activities...";
+    els.queryList.innerHTML = "";
+    updateQuerySearchSummary();
+    setLoadedButtonLabels();
+
+    buildAutomationMatchesByQueryId(true)
+      .then(function () {
+        return loadQueryActivityPages(1, 250, [], null);
+      })
+      .then(function (result) {
+        state.queries.total = result.total;
+        return hydrateQueryActivities(result.items);
+      })
+      .then(function (items) {
+        var seen = {};
+        state.queries.items = items.filter(Boolean).filter(function (item) {
+          var key = String(item.id || item.key || item.name || "").toLowerCase();
+          if (!key) return true;
+          if (seen[key]) return false;
+          seen[key] = true;
+          return true;
+        }).sort(function (a, b) {
+          return (a.name || "").localeCompare(b.name || "");
+        });
+        state.queries.loaded = true;
+        state.queries.scanning = false;
+        state.queries.scannedAt = Date.now();
+        els.queryLoading.classList.add("hidden");
+        els.querySearchInput.disabled = false;
+        updateQuerySearchSummary();
+        setLoadedButtonLabels();
+        renderQueryResults(els.querySearchInput.value.trim());
+        savePopupCache();
+      })
+      .catch(function (err) {
+        state.queries.scanning = false;
+        state.queries.loaded = false;
+        els.queryLoading.classList.add("hidden");
+        els.queryList.innerHTML = '<div class="no-results" style="color:var(--red)">' + escHtml(err.message) + "</div>";
+        updateQuerySearchSummary();
+        setLoadedButtonLabels();
+      });
+  }
+
+  function clearQueryIndex() {
+    state.queries.items = [];
+    state.queries.loaded = false;
+    state.queries.scanning = false;
+    state.queries.scannedAt = null;
+    state.queries.total = null;
+    state.relations.automationMatchesByQueryId = {};
+    state.relations.querySqlById = {};
+    els.querySearchInput.value = "";
+    els.querySearchInput.disabled = true;
+    els.queryLoading.classList.add("hidden");
+    els.queryList.innerHTML = '<div class="no-results">Query metadata will index automatically when the SFMC session is ready.</div>';
+    updateQuerySearchSummary();
+    setLoadedButtonLabels();
+    savePopupCache();
+  }
+
+  els.btnScanQueries.addEventListener("click", loadQueryIndex);
+  els.btnClearQueryIndex.addEventListener("click", clearQueryIndex);
+  els.btnOpenSqlSearch.addEventListener("click", openSqlSearchTab);
+  els.btnOpenSqlSearchLarge.addEventListener("click", openSqlSearchTab);
+  els.querySearchInput.addEventListener("input", function () {
+    renderQueryResults(els.querySearchInput.value);
+  });
 
   // ─── JOURNEYS TAB ────────────────────────────────────────────────────────────
 
@@ -969,7 +1670,7 @@
     els.journeyList.innerHTML = items.map(function (j) {
       return '<div class="list-item">' +
         '<div class="list-item-main">' +
-          '<div class="list-item-name">' + highlight(j.name, q) + "</div>" +
+          nativeLinkHtml(highlight(j.name, q), "journey", j, "list-item-name native-inline-link") +
           '<div class="list-item-sub">v' + j.version + " · " + j.activityCount + " activities</div>" +
         "</div>" +
         '<div class="list-item-badges">' + statusTag(j.status) + "</div>" +
@@ -978,14 +1679,19 @@
   }
 
   function loadJourneys() {
+    if (!state.session || !state.session.isValid || state.journeys.loading) return;
+    state.journeys.loading = true;
     els.journeyLoading.classList.remove("hidden");
     els.journeyList.innerHTML = "";
+    setLoadedButtonLabels();
 
     SfmcApi.getJourneys(1, 100).then(function (data) {
+      state.journeys.loading = false;
       els.journeyLoading.classList.add("hidden");
       var items = (data.items || data.interactions || data || []).map(function (j) {
         return {
           id:            j.id || "",
+          url:           j.url || j.link || j.nativeUrl || "",
           name:          j.name || "—",
           status:        j.status || "—",
           version:       j.version || 1,
@@ -1001,7 +1707,9 @@
       renderJourneyList(els.globalSearch.value.trim());
       savePopupCache();
     }).catch(function (err) {
+      state.journeys.loading = false;
       els.journeyLoading.classList.add("hidden");
+      setLoadedButtonLabels();
       els.journeyList.innerHTML = '<div class="no-results" style="color:var(--red)">' + escHtml(err.message) + "</div>";
     });
   }

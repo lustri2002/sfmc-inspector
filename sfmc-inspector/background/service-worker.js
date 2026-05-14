@@ -33,6 +33,12 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
         .then(function(result) { sendResponse({ ok: true, data: result }); })
         .catch(function(err)   { sendResponse({ ok: false, error: err.message }); });
       return true;
+
+    case "OPEN_NATIVE_OBJECT":
+      openNativeObject(msg.payload)
+        .then(function(result) { sendResponse({ ok: true, data: result }); })
+        .catch(function(err)   { sendResponse({ ok: false, error: err.message }); });
+      return true;
   }
   return true;
 });
@@ -125,6 +131,105 @@ async function handleApiCall(payload) {
 
   try { return JSON.parse(result.text); }
   catch(e) { return { raw: result.text }; }
+}
+
+// ── Native UI navigation ─────────────────────────────────────────────────────
+
+function wait(ms) {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
+function getHostFromUrl(url) {
+  try { return new URL(url).hostname; }
+  catch(e) { return ""; }
+}
+
+async function findSfmcTab(fallbackUrl) {
+  var hostname = session.hostname || getHostFromUrl(fallbackUrl);
+  if (!hostname) throw new Error("Session not established. Click Refresh.");
+
+  var tabs = await chrome.tabs.query({});
+  var sfmcTab = tabs.find(function(t) {
+    return t.url && t.url.includes(hostname);
+  });
+  if (!sfmcTab) throw new Error("SFMC tab not found. Keep the SFMC tab open.");
+  return sfmcTab;
+}
+
+async function focusSfmcTab(tab, url) {
+  var updatedTab = await chrome.tabs.update(tab.id, { url: url, active: true });
+  if (tab.windowId != null && chrome.windows && chrome.windows.update) {
+    await chrome.windows.update(tab.windowId, { focused: true });
+  }
+  return updatedTab || tab;
+}
+
+async function navigateContactBuilderFrame(tabId, objectId) {
+  var lastFrames = [];
+
+  for (var attempt = 0; attempt < 24; attempt++) {
+    var results;
+    try {
+      results = await chrome.scripting.executeScript({
+        target: { tabId: tabId, allFrames: true },
+        func: function(dataExtensionObjectId) {
+          var href = window.location.href;
+          var isContactBuilderFrame = href.indexOf("contactsmeta/admin.html") !== -1;
+          if (!isContactBuilderFrame) {
+            return { matched: false, href: href };
+          }
+
+          var target = window.location.origin +
+            "/contactsmeta/admin.html#admin/data-extension/" +
+            encodeURIComponent(dataExtensionObjectId) +
+            "/properties/";
+
+          if (window.location.href !== target) {
+            window.location.assign(target);
+          }
+
+          return { matched: true, href: href, target: target };
+        },
+        args: [objectId]
+      });
+    } catch(e) {
+      results = [];
+    }
+
+    lastFrames = (results || []).map(function(r) {
+      return r && r.result ? r.result : null;
+    }).filter(Boolean);
+
+    var match = lastFrames.find(function(frame) {
+      return frame.matched;
+    });
+    if (match) return match;
+
+    await wait(500);
+  }
+
+  throw new Error("Ho aperto Contact Builder, ma non ho trovato l'iframe contactsmeta da pilotare.");
+}
+
+async function openNativeObject(payload) {
+  payload = payload || {};
+  if (payload.objectType !== "dataExtension") {
+    throw new Error("Open in SFMC non disponibile per questo oggetto.");
+  }
+  if (!payload.objectId) {
+    throw new Error("ObjectID della Data Extension non disponibile.");
+  }
+
+  var tab = await findSfmcTab(payload.fallbackUrl);
+  var contactBuilderUrl = payload.fallbackUrl ||
+    ("https://" + session.hostname + "/cloud/#app/Contact%20Builder");
+
+  var updatedTab = await focusSfmcTab(tab, contactBuilderUrl);
+  await wait(1000);
+
+  return navigateContactBuilderFrame(updatedTab.id || tab.id, payload.objectId);
 }
 
 // ── Session status ────────────────────────────────────────────────────────────

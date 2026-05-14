@@ -6,78 +6,100 @@
   <title>SFMC Inspector</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Geist:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
 
-  <!-- ── Header ─────────────────────────────────────────────────────────────── -->
   <header class="app-header">
-    <div class="logo">
-      <span class="logo-icon">◈</span>
-      <span class="logo-text">SFMC <strong>Inspector</strong></span>
-    </div>
-    <div class="header-right">
-      <div id="session-badge" class="badge badge--detecting">
-        <span class="badge-dot"></span>
-        <span class="badge-label">Detecting…</span>
+    <div class="header-top">
+      <div class="brand-lockup">
+        <span class="logo-icon">SI</span>
+        <div class="brand-copy">
+          <span class="logo-text">SFMC Inspector</span>
+          <span class="logo-subtitle">Marketing Cloud tools</span>
+        </div>
       </div>
-      <button id="btn-refresh" class="icon-btn" title="Refresh session">↺</button>
+      <div class="header-right">
+        <div id="session-badge" class="badge badge--detecting">
+          <span class="badge-dot"></span>
+          <span class="badge-label">Detecting…</span>
+        </div>
+        <button id="btn-refresh" class="icon-btn" title="Refresh session" aria-label="Refresh session">↺</button>
+      </div>
+    </div>
+
+    <div id="session-bar" class="session-bar hidden">
+      <span class="session-meta">
+        <span class="session-label">Host</span>
+        <span class="session-env" id="session-env-label">—</span>
+      </span>
+      <span class="session-divider"></span>
+      <span class="session-meta">
+        <span class="session-label">Stack</span>
+        <span class="session-stack" id="session-stack-label">—</span>
+      </span>
     </div>
   </header>
 
-  <!-- ── Session info bar ───────────────────────────────────────────────────── -->
-  <div id="session-bar" class="session-bar hidden">
-    <span class="session-env" id="session-env-label">—</span>
-    <span class="session-divider">·</span>
-    <span class="session-stack" id="session-stack-label">—</span>
-  </div>
-
-  <!-- ── No-session overlay ─────────────────────────────────────────────────── -->
   <div id="no-session-view" class="empty-state hidden">
-    <div class="empty-icon">⚡</div>
+    <div class="empty-icon">!</div>
     <p class="empty-title">No SFMC session detected</p>
     <p class="empty-desc">Open Salesforce Marketing Cloud in another tab, then come back here.</p>
   </div>
 
-  <!-- ── Main content ───────────────────────────────────────────────────────── -->
   <div id="main-view" class="hidden">
 
-    <!-- Quick Search -->
-    <div class="search-wrap">
-      <span class="search-icon">⌕</span>
-      <input
-        type="text"
-        id="global-search"
-        class="search-input"
-        placeholder="Search DEs, Automations, Journeys…"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <kbd class="search-hint">⌘K</kbd>
+    <div class="command-center">
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input
+          type="text"
+          id="global-search"
+          class="search-input"
+          placeholder="Search DEs, Automations, Journeys…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <kbd class="search-hint">⌘K</kbd>
+      </div>
+
+      <button class="sql-launch-btn" id="btn-open-sql-search">
+        <span class="sql-launch-icon">SQL</span>
+        <span class="sql-launch-copy">
+          <span class="sql-launch-title">Open SQL Search</span>
+          <span class="sql-launch-desc">Runs in a dedicated tab</span>
+        </span>
+        <span class="sql-launch-arrow">↗</span>
+      </button>
+
+      <nav class="tab-nav" aria-label="Inspector sections">
+        <button class="tab-btn active" data-tab="de" title="Data Extensions">
+          <span class="tab-icon">▦</span>
+          <span class="tab-label">DEs</span>
+        </button>
+        <button class="tab-btn" data-tab="automations" title="Automations">
+          <span class="tab-icon">⚙</span>
+          <span class="tab-label">Automations</span>
+        </button>
+        <button class="tab-btn" data-tab="journeys" title="Journeys">
+          <span class="tab-icon">↝</span>
+          <span class="tab-label">Journeys</span>
+        </button>
+        <button class="tab-btn" data-tab="linter" title="Linter">
+          <span class="tab-icon">✦</span>
+          <span class="tab-label">Lint</span>
+        </button>
+      </nav>
     </div>
 
-    <!-- Nav tabs -->
-    <nav class="tab-nav">
-      <button class="tab-btn active" data-tab="de">
-        <span class="tab-icon">▦</span> Data Extensions
-      </button>
-      <button class="tab-btn" data-tab="automations">
-        <span class="tab-icon">⚙</span> Automations
-      </button>
-      <button class="tab-btn" data-tab="journeys">
-        <span class="tab-icon">↝</span> Journeys
-      </button>
-      <button class="tab-btn" data-tab="linter">
-        <span class="tab-icon">✦</span> Linter
-      </button>
-    </nav>
-
-    <!-- ── Tab: Data Extensions ─────────────────────────────────────────────── -->
     <section id="tab-de" class="tab-panel active">
-      <div class="panel-toolbar">
-        <span class="record-count" id="de-count">—</span>
-        <button class="small-btn" id="btn-load-de">Load</button>
+      <div class="panel-toolbar" id="de-toolbar">
+        <div class="toolbar-copy">
+          <span class="toolbar-title">Data Extensions</span>
+          <span class="record-count" id="de-count">—</span>
+        </div>
+        <button class="small-btn primary-action" id="btn-load-de">Load</button>
       </div>
 
       <div id="de-loading" class="loader-wrap hidden">
@@ -87,18 +109,19 @@
 
       <div id="de-list" class="item-list"></div>
 
-      <!-- DE Detail panel (shown when a DE is selected) -->
       <div id="de-detail" class="detail-panel hidden">
         <button class="back-btn" id="btn-de-back">← Back</button>
         <div id="de-detail-content"></div>
       </div>
     </section>
 
-    <!-- ── Tab: Automations ──────────────────────────────────────────────────── -->
     <section id="tab-automations" class="tab-panel">
-      <div class="panel-toolbar">
-        <span class="record-count" id="auto-count">—</span>
-        <button class="small-btn" id="btn-load-auto">Load</button>
+      <div class="panel-toolbar" id="auto-toolbar">
+        <div class="toolbar-copy">
+          <span class="toolbar-title">Automations</span>
+          <span class="record-count" id="auto-count">—</span>
+        </div>
+        <button class="small-btn primary-action" id="btn-load-auto">Load</button>
       </div>
 
       <div id="auto-loading" class="loader-wrap hidden">
@@ -114,11 +137,13 @@
       </div>
     </section>
 
-    <!-- ── Tab: Journeys ────────────────────────────────────────────────────── -->
     <section id="tab-journeys" class="tab-panel">
       <div class="panel-toolbar">
-        <span class="record-count" id="journey-count">—</span>
-        <button class="small-btn" id="btn-load-journeys">Load</button>
+        <div class="toolbar-copy">
+          <span class="toolbar-title">Journeys</span>
+          <span class="record-count" id="journey-count">—</span>
+        </div>
+        <button class="small-btn primary-action" id="btn-load-journeys">Load</button>
       </div>
 
       <div id="journey-loading" class="loader-wrap hidden">
@@ -129,8 +154,14 @@
       <div id="journey-list" class="item-list"></div>
     </section>
 
-    <!-- ── Tab: Linter ──────────────────────────────────────────────────────── -->
     <section id="tab-linter" class="tab-panel">
+      <div class="panel-toolbar">
+        <div class="toolbar-copy">
+          <span class="toolbar-title">Linter</span>
+          <span class="record-count">SQL and AMPScript</span>
+        </div>
+      </div>
+
       <div class="linter-mode-bar">
         <button class="mode-btn active" data-mode="sql">SQL</button>
         <button class="mode-btn" data-mode="ampscript">AMPScript</button>
@@ -155,9 +186,18 @@
 
   </div>
 
-  <!-- ── Footer ─────────────────────────────────────────────────────────────── -->
+  <div class="legacy-query-elements hidden" aria-hidden="true">
+    <span id="query-count">—</span>
+    <button id="btn-clear-query-index" type="button">Clear</button>
+    <button id="btn-scan-queries" type="button">Scan</button>
+    <button id="btn-open-sql-search-large" type="button">Open SQL Search</button>
+    <input id="query-search-input" type="text" disabled />
+    <div id="query-loading"><span id="query-loading-label">Scanning Query Activities…</span></div>
+    <div id="query-list"></div>
+  </div>
+
   <footer class="app-footer">
-    <span>SFMC Inspector · v0.1.1</span>
+    <span>SFMC Inspector · v0.1.2</span>
     <a href="https://vincenzoboellis.com" target="_blank" class="footer-link">by Vincenzo Boellis ↗</a>
   </footer>
 

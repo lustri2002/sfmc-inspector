@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SFMC Inspector SQL Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="sql-search.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-main">
+      <div class="brand">
+        <span class="brand-mark">SI</span>
+        <div>
+          <h1>SQL Search</h1>
+          <p>Query Activities and automation usage.</p>
+        </div>
+      </div>
+      <div class="session-card">
+        <span id="session-badge" class="badge badge--detecting"><span class="badge-dot"></span><span id="session-label">Detecting</span></span>
+        <span id="session-host" class="session-host">—</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <aside class="sidebar">
+      <section class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Index</span>
+          <span id="cache-label" class="muted">No cache</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric">
+            <span id="query-total">—</span>
+            <label>Queries</label>
+          </div>
+          <div class="metric">
+            <span id="automation-total">—</span>
+            <label>Automations</label>
+          </div>
+          <div class="metric">
+            <span id="usage-total">—</span>
+            <label>Links</label>
+          </div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          <span id="progress-label">Waiting for SFMC session…</span>
+        </div>
+        <div class="actions">
+          <button id="btn-rescan" class="primary-btn">Rescan</button>
+          <button id="btn-clear" class="small-btn">Clear cache</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Filters</span>
+          <span id="result-count" class="muted">—</span>
+        </div>
+        <div class="field-label">Search in</div>
+        <div class="scope-list">
+          <label class="check-row">
+            <input class="scope-filter" type="checkbox" value="queryText" checked>
+            <span>Query text</span>
+          </label>
+          <label class="check-row">
+            <input class="scope-filter" type="checkbox" value="targetDe">
+            <span>Target Data Extension</span>
+          </label>
+          <label class="check-row">
+            <input class="scope-filter" type="checkbox" value="activityName">
+            <span>Query Activity name</span>
+          </label>
+          <label class="check-row">
+            <input class="scope-filter" type="checkbox" value="automationName">
+            <span>Automation name</span>
+          </label>
+        </div>
+        <label class="check-row">
+          <input id="only-used-filter" type="checkbox">
+          <span>Only queries used by automations</span>
+        </label>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="search-panel">
+        <span class="search-icon">⌕</span>
+        <input
+          id="search-input"
+          class="search-input"
+          type="text"
+          placeholder="Search SQL, fields, Data Extensions, Query Activities, Automation names…"
+          spellcheck="false"
+          autocomplete="off"
+          disabled
+        >
+      </div>
+
+      <div id="state-message" class="state-message">
+        Keep an SFMC tab open. Indexing starts automatically when the session is ready.
+      </div>
+
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+
+  <script src="../shared/sfmc-api.js"></script>
+  <script src="sql-search.js"></script>
+</body>
+</html>
