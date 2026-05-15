@@ -2,9 +2,17 @@
 
 > The definitive developer toolkit for Salesforce Marketing Cloud Engagement.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.2-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Manifest](https://img.shields.io/badge/manifest-v3-orange)
+
+---
+
+## Fork notice
+
+This project is a fork of the original [`TokyoYugen/sfmc-inspector`](https://github.com/TokyoYugen/sfmc-inspector) project.
+
+All credit for the original idea, foundation, and early implementation goes to the original author. This fork builds on that work with additional navigation, search, linting, and UI improvements for Salesforce Marketing Cloud developers.
 
 ---
 
@@ -12,7 +20,7 @@
 
 SFMC Inspector runs inside your browser while you're logged into Salesforce Marketing Cloud. It reads your existing session — no OAuth setup, no credentials to enter — and gives you superpowers the native UI doesn't have.
 
-### Features (v0.1.0)
+### Features (v1.1.2)
 
 | Feature | Description |
 |---|---|
@@ -21,9 +29,26 @@ SFMC Inspector runs inside your browser while you're logged into Salesforce Mark
 | **DE → Automation Map** | For any DE, see which Query Activities write to it and their SQL |
 | **DE → Journey Map** | See which Journeys reference a DE as entry source or activity |
 | **Automation Monitor** | Browse automations with status, schedule, and inline SQL preview |
+| **Query Activity Index** | Index Query Activities, hydrate SQL text, and correlate queries with automations |
+| **SQL Search Workspace** | Open a dedicated full-page SQL Search tool for searching SQL, target DEs, Query Activity names, and automation usage |
 | **SQL Linter** | 10-rule static analysis for SFMC Query Activity SQL |
 | **AMPScript Linter** | 10-rule static analysis for AMPScript V1 blocks |
 | **Global Search** | ⌘K search across DEs, Automations, Journeys simultaneously |
+| **View in SFMC** | Click native object names in Inspector to jump back into Salesforce Marketing Cloud |
+| **Native DE Navigation** | Attempts to open Data Extensions inside the authenticated Contact Builder iframe using the DE ObjectID |
+| **Native Automation Navigation** | Opens Automation Studio on the selected automation when a direct shell route is available |
+| **Native Query Navigation** | Opens Query Activity modals from automation details and SQL search results |
+| **Native Journey Navigation** | Opens Journey Builder on the selected Journey when journey IDs are available, otherwise falls back to Journey Builder |
+| **Refreshed Popup UI** | Updated light Salesforce-inspired layout, detail panels, toolbar controls, loading states, and native-open affordances |
+
+### Native navigation notes
+
+SFMC apps are often rendered inside nested iframes, so not every object has a stable URL visible in the browser address bar. Inspector handles this in two ways:
+
+- Automations, Query Activities, and Journeys use Marketing Cloud shell routes when a stable route is available.
+- Data Extensions use a Contact Builder-specific flow: Inspector focuses the existing SFMC tab, opens Contact Builder, injects into available frames, detects the authenticated `contactsmeta` iframe, and navigates that iframe to the selected Data Extension properties route.
+
+If a direct object route cannot be built, Inspector opens the closest native SFMC section instead of sending you to a broken login page.
 
 ---
 
@@ -63,8 +88,12 @@ sfmc-inspector/
 │   └── detector.js               # SFMC page detector, token extractor
 ├── panel/
 │   ├── popup.html                # Extension popup UI
-│   ├── popup.css                 # Styles (dark theme, Geist + JetBrains Mono)
+│   ├── popup.css                 # Popup styles and native navigation affordances
 │   └── popup.js                  # UI controller
+├── sql-search/
+│   ├── sql-search.html           # Dedicated SQL Search workspace
+│   ├── sql-search.css            # SQL Search styles
+│   └── sql-search.js             # Query Activity indexing and SQL search UI
 ├── shared/
 │   ├── sfmc-api.js               # REST API wrapper
 │   ├── sql-linter.js             # SQL static analysis (10 rules)
@@ -110,7 +139,10 @@ sfmc-inspector/
 
 ## Roadmap
 
-- [ ] Icons (v0.1.1)
+- [x] Icons (v1.1.2)
+- [x] Dedicated SQL Search workspace
+- [x] Clickable native object navigation
+- [ ] Harden Contact Builder iframe navigation across more SFMC stacks
 - [ ] Journey dependency map (visual tree)
 - [ ] DE Health Dashboard (NULL columns, orphaned DEs)
 - [ ] Broken link detector for emails
